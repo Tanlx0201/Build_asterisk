@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import re
-from typing import List
 
 
 class QueryIntent(str, Enum):
@@ -18,15 +17,18 @@ class QueryIntent(str, Enum):
 class StructuredQuery:
     original_question: str
     intent: QueryIntent
-    keywords: List[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
     semantic_query: str = ""
-    target_languages: List[str] = field(default_factory=list)
-    target_modules_or_files: List[str] = field(default_factory=list)
+    target_languages: list[str] = field(default_factory=list)
+    target_modules_or_files: list[str] = field(default_factory=list)
     time_constraint: str | None = None
 
 
 class QueryAnalyzer:
     """Lightweight deterministic query analyzer for RAG routing."""
+
+    STOPWORDS = {"what", "where", "when", "with", "does", "the", "and"}
+    MAX_KEYWORDS = 12
 
     _LANGUAGE_ALIASES = {
         "python": "python",
@@ -52,14 +54,18 @@ class QueryAnalyzer:
     def analyze(self, question: str) -> StructuredQuery:
         normalized = question.lower().strip()
         intent = self._classify_intent(normalized)
-        keywords = [k for k in re.findall(r"[a-zA-Z_][a-zA-Z0-9_\-/]{2,}", normalized) if k not in {"what", "where", "when", "with", "does", "the", "and"}]
+        keywords = [
+            keyword
+            for keyword in re.findall(r"[a-zA-Z_][a-zA-Z0-9_\-/]{2,}", normalized)
+            if keyword not in self.STOPWORDS
+        ]
         target_languages = [lang for key, lang in self._LANGUAGE_ALIASES.items() if key in normalized]
         target_modules = re.findall(r"(?:module|file|service)\s+([\w./-]+)", normalized)
         time_constraint = "recent" if "recent" in normalized or "last sprint" in normalized else None
         return StructuredQuery(
             original_question=question,
             intent=intent,
-            keywords=keywords[:12],
+            keywords=keywords[: self.MAX_KEYWORDS],
             semantic_query=question,
             target_languages=sorted(set(target_languages)),
             target_modules_or_files=target_modules,

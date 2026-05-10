@@ -18,6 +18,8 @@ class RetrievalItem:
 
 
 class MultiSourceRetriever:
+    MAX_RETRIEVAL_RESULTS = 15
+
     def retrieve(self, query: StructuredQuery) -> list[RetrievalItem]:
         with ThreadPoolExecutor(max_workers=3) as executor:
             vector_future = executor.submit(self._vector_search, query)
@@ -27,20 +29,65 @@ class MultiSourceRetriever:
             merged = self._rrf_merge(
                 [vector_future.result(), keyword_future.result(), graph_future.result()],
             )
-        return merged[:15]
+        return merged[: self.MAX_RETRIEVAL_RESULTS]
 
     def _vector_search(self, query: StructuredQuery) -> list[RetrievalItem]:
-        return [RetrievalItem("vector", f"v{i}", f"src/{keyword}.py", (1, 10), 1.0 - (i * 0.05), {"keyword": keyword}) for i, keyword in enumerate(query.keywords[:10])]
+        return [
+            RetrievalItem(
+                "vector",
+                f"v{index}",
+                f"src/{keyword}.py",
+                (1, 10),
+                1.0 - (index * 0.05),
+                {"keyword": keyword},
+            )
+            for index, keyword in enumerate(query.keywords[:10])
+        ]
 
     def _keyword_search(self, query: StructuredQuery) -> list[RetrievalItem]:
-        boosted = sorted(query.keywords, key=lambda value: ("function" not in value, "class" not in value))
-        return [RetrievalItem("keyword", f"k{i}", f"docs/{keyword}.md", (1, 30), 1.0 - (i * 0.1), {"keyword": keyword}) for i, keyword in enumerate(boosted[:10])]
+        prioritized_keywords = sorted(
+            query.keywords,
+            key=lambda value: ("function" not in value, "class" not in value),
+        )
+        return [
+            RetrievalItem(
+                "keyword",
+                f"k{index}",
+                f"docs/{keyword}.md",
+                (1, 30),
+                1.0 - (index * 0.1),
+                {"keyword": keyword},
+            )
+            for index, keyword in enumerate(prioritized_keywords[:10])
+        ]
 
     def _graph_search(self, query: StructuredQuery) -> list[RetrievalItem]:
-        return [RetrievalItem("graph", f"g{i}", f"graph/{module}.node", (0, 0), 0.9 - (i * 0.1), {"module": module}) for i, module in enumerate(query.target_modules_or_files[:10])]
+        return [
+            RetrievalItem(
+                "graph",
+                f"g{index}",
+                f"graph/{module}.node",
+                (0, 0),
+                0.9 - (index * 0.1),
+                {"module": module},
+            )
+            for index, module in enumerate(query.target_modules_or_files[:10])
+        ]
 
     @staticmethod
     def _rrf_merge(result_lists: Iterable[list[RetrievalItem]], k: int = 60) -> list[RetrievalItem]:
+        """Merge ranked lists with Reciprocal Rank Fusion.
+
+        Each result contributes `1 / (k + rank)` to its deduplicated key score,
+        where `k` smooths the impact of top-rank variance across strategies.
+
+        Args:
+            result_lists: Ranked retrieval lists from each retrieval strategy.
+            k: RRF smoothing constant.
+
+        Returns:
+            A single reranked list of deduplicated retrieval items.
+        """
         scores: dict[str, float] = {}
         by_key: dict[str, RetrievalItem] = {}
         for result_list in result_lists:

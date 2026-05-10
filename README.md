@@ -21,6 +21,6 @@ configuration.
 ## Run tests
 
 ```bash
-cd /home/runner/work/Build_asterisk/Build_asterisk
+cd <project_root>
 python -m unittest tests/unit/test_codemind_minimal.py -v
 ```

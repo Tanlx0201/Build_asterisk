@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
 import re
-from typing import Iterable, List
+from typing import Iterable
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -50,6 +54,8 @@ class ParseResult:
 
 
 class ASTParser:
+    MIN_LONG_STRING_LENGTH = 50
+
     SUPPORTED_LANGUAGES = {
         ".py": "python",
         ".ts": "typescript",
@@ -90,7 +96,7 @@ class ASTParser:
             classes=[],
             imports=[],
             exports=self._extract_exports(source),
-            long_strings=[s for s in re.findall(r"(['\"]{1,3})(.*?)(\1)", source, re.DOTALL) if len(s[1]) > 50],
+            long_strings=self._extract_long_strings(source),
             todos=self.TODO_PATTERN.findall(source),
         )
 
@@ -132,7 +138,11 @@ class ASTParser:
                         is_relative=(node.level or 0) > 0,
                     )
                 )
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str) and len(node.value) > 50:
+            elif (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and len(node.value) > self.MIN_LONG_STRING_LENGTH
+            ):
                 long_strings.append(node.value)
 
         todos = [match.group(0) for match in self.TODO_PATTERN.finditer(source)]
@@ -161,6 +171,19 @@ class ASTParser:
         names = re.findall(r"['\"]([^'\"]+)['\"]", export_match.group(1))
         return names
 
+    def _extract_long_strings(self, source: str) -> list[str]:
+        min_length_plus_one = self.MIN_LONG_STRING_LENGTH + 1
+        pattern = re.compile(
+            rf"\"\"\"(.*?)\"\"\"|'''(.*?)'''|\"([^\"]{{{min_length_plus_one},}})\"|'([^']{{{min_length_plus_one},}})'",
+            re.DOTALL,
+        )
+        long_strings: list[str] = []
+        for match in pattern.finditer(source):
+            value = next((group for group in match.groups() if group), "")
+            if len(value) > self.MIN_LONG_STRING_LENGTH:
+                long_strings.append(value)
+        return long_strings
+
 
 def parse_repository_files(paths: Iterable[str]) -> list[ParseResult]:
     parser = ASTParser()
@@ -168,6 +191,7 @@ def parse_repository_files(paths: Iterable[str]) -> list[ParseResult]:
     for path in paths:
         try:
             results.append(parser.parse_file(path))
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed parsing %s (%s): %s", path, type(exc).__name__, exc)
             continue
     return results

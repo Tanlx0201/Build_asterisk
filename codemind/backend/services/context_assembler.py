@@ -6,7 +6,13 @@ from .retriever import RetrievalItem
 
 
 class ContextAssembler:
-    def assemble(self, chunks: list[RetrievalItem], token_budget: int = 120_000) -> str:
+    DEFAULT_CHARACTER_BUDGET = 120_000
+
+    def assemble(
+        self,
+        chunks: list[RetrievalItem],
+        character_budget: int = DEFAULT_CHARACTER_BUDGET,
+    ) -> str:
         grouped: dict[str, list[RetrievalItem]] = defaultdict(list)
         for chunk in chunks:
             grouped[chunk.file_path].append(chunk)
@@ -18,7 +24,18 @@ class ContextAssembler:
             for chunk in ordered:
                 sections.append(f"- lines {chunk.line_range[0]}-{chunk.line_range[1]} ({chunk.source})")
 
-        context = "\n".join(sections)
-        if len(context) > token_budget:
-            return context[:token_budget]
-        return context
+        if not sections:
+            return ""
+
+        context_parts: list[str] = []
+        current_length = 0
+        for section in sections:
+            candidate = section if not context_parts else f"\n{section}"
+            if current_length + len(candidate) > character_budget:
+                truncation_marker = "\n... [truncated]"
+                if current_length + len(truncation_marker) <= character_budget:
+                    context_parts.append(truncation_marker)
+                break
+            context_parts.append(candidate)
+            current_length += len(candidate)
+        return "".join(context_parts)

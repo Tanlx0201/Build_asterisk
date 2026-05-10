@@ -24,12 +24,19 @@ class CodeChunk:
 class SemanticChunker:
     """AST-aware chunker that groups by symbols rather than token windows."""
 
+    SMALL_FUNCTION_LINE_THRESHOLD = 10
+    MIN_FUNCTIONS_TO_MERGE = 2
+
     def build_chunks(self, repo_id: str, parse_result: ParseResult, source_text: str) -> list[CodeChunk]:
         lines = source_text.splitlines()
         chunks: list[CodeChunk] = []
 
         if parse_result.imports:
-            header_end = min(max((f.line_range.line_start for f in parse_result.functions), default=1) - 1, len(lines))
+            first_function_line = min(
+                (function.line_range.line_start for function in parse_result.functions),
+                default=1,
+            )
+            header_end = min(first_function_line - 1, len(lines))
             chunks.append(
                 CodeChunk(
                     repo_id=repo_id,
@@ -84,20 +91,23 @@ class SemanticChunker:
 
         return self._group_small_functions(chunks)
 
-    @staticmethod
-    def _group_small_functions(chunks: Iterable[CodeChunk]) -> list[CodeChunk]:
+    @classmethod
+    def _group_small_functions(cls, chunks: Iterable[CodeChunk]) -> list[CodeChunk]:
         grouped: list[CodeChunk] = []
         carry: list[CodeChunk] = []
 
         for chunk in sorted(chunks, key=lambda c: (c.file_path, c.line_start)):
-            if chunk.chunk_type == "function" and (chunk.line_end - chunk.line_start + 1) < 10:
+            if (
+                chunk.chunk_type == "function"
+                and (chunk.line_end - chunk.line_start + 1) < cls.SMALL_FUNCTION_LINE_THRESHOLD
+            ):
                 carry.append(chunk)
-                if len(carry) >= 2:
+                if len(carry) >= cls.MIN_FUNCTIONS_TO_MERGE:
                     merged = CodeChunk(
                         repo_id=chunk.repo_id,
                         file_path=chunk.file_path,
                         chunk_type="function",
-                        symbol_name=" + ".join(c.symbol_name or "" for c in carry),
+                        symbol_name=", ".join(c.symbol_name or "" for c in carry),
                         parent_symbol=None,
                         line_start=carry[0].line_start,
                         line_end=carry[-1].line_end,
