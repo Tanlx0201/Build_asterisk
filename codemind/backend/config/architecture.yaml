@@ -1,0 +1,28 @@
+rules:
+  - name: "Layered Architecture"
+    description: "Presentation → Business → Data. No reverse dependencies."
+    layers:
+      - name: presentation
+        paths: ["src/api/**", "src/controllers/**", "src/routes/**"]
+      - name: business
+        paths: ["src/services/**", "src/domain/**", "src/usecases/**"]
+      - name: data
+        paths: ["src/repositories/**", "src/dao/**", "src/models/**"]
+    constraints:
+      - "presentation -> business: ALLOWED"
+      - "presentation -> data: FORBIDDEN"
+      - "business -> data: ALLOWED"
+      - "data -> business: FORBIDDEN"
+      - "data -> presentation: FORBIDDEN"
+      - "business -> presentation: FORBIDDEN"
+
+  - name: "No Circular Dependencies"
+    description: "No circular import chains between modules"
+    check: circular_dependency
+    severity: critical
+
+  - name: "Shared Kernel Isolation"
+    description: "shared/ can only be imported, never imports from features"
+    paths_importing: ["src/shared/**"]
+    paths_not_importing: ["src/shared/**"]
+    must_not_import: ["src/features/**", "src/modules/**"]
